@@ -38,274 +38,286 @@ Point _2Gn;
 
 // ----------------------------------------------------------------------------
 
-VanitySearch::VanitySearch(Secp256K1 *secp, vector<std::string> &inputPrefixes,string seed,int searchMode,
-                           bool useGpu, bool stop, string outputFile, bool useSSE, uint32_t maxFound,
-                           uint64_t rekey, bool caseSensitive, Point &startPubKey, bool paranoiacSeed)
-  :inputPrefixes(inputPrefixes) {
+VanitySearch::VanitySearch(Secp256K1* secp, vector<std::string>& inputPrefixes, string seed, int searchMode,
+    bool useGpu, bool stop, string outputFile, bool useSSE, uint32_t maxFound,
+    uint64_t rekey, bool caseSensitive, Point& startPubKey, bool paranoiacSeed, Int startPriv)
+    :inputPrefixes(inputPrefixes) {
 
-  this->secp = secp;
-  this->searchMode = searchMode;
-  this->useGpu = useGpu;
-  this->stopWhenFound = stop;
-  this->outputFile = outputFile;
-  this->useSSE = useSSE;
-  this->nbGPUThread = 0;
-  this->maxFound = maxFound;
-  this->rekey = rekey;
-  this->searchType = -1;
-  this->startPubKey = startPubKey;
-  this->hasPattern = false;
-  this->caseSensitive = caseSensitive;
-  this->startPubKeySpecified = !startPubKey.isZero();
+    this->secp = secp;
+    this->searchMode = searchMode;
+    this->useGpu = useGpu;
+    this->stopWhenFound = stop;
+    this->outputFile = outputFile;
+    this->useSSE = useSSE;
+    this->nbGPUThread = 0;
+    this->maxFound = maxFound;
+    this->rekey = rekey;
+    this->searchType = -1;
+    this->startPubKey = startPubKey;
+    this->hasPattern = false;
+    this->caseSensitive = caseSensitive;
+    this->startPubKeySpecified = !startPubKey.isZero();
+    this->startPriv = startPriv;
 
-  lastRekey = 0;
-  prefixes.clear();
+    lastRekey = 0;
+    prefixes.clear();
 
-  // Create a 65536 items lookup table
-  PREFIX_TABLE_ITEM t;
-  t.found = true;
-  t.items = NULL;
-  for(int i=0;i<65536;i++)
-    prefixes.push_back(t);
+    // Create a 65536 items lookup table
+    PREFIX_TABLE_ITEM t;
+    t.found = true;
+    t.items = NULL;
+    for (int i = 0; i < 65536; i++)
+        prefixes.push_back(t);
 
-  // Check is inputPrefixes contains wildcard character
-  for (int i = 0; i < (int)inputPrefixes.size() && !hasPattern; i++) {
-    hasPattern = ((inputPrefixes[i].find('*') != std::string::npos) ||
-                   (inputPrefixes[i].find('?') != std::string::npos) );
-  }
+    // Check is inputPrefixes contains wildcard character
+    for (int i = 0; i < (int)inputPrefixes.size() && !hasPattern; i++) {
+        hasPattern = ((inputPrefixes[i].find('*') != std::string::npos) ||
+            (inputPrefixes[i].find('?') != std::string::npos));
+    }
 
-  if (!hasPattern) {
+    if (!hasPattern) {
 
-    // No wildcard used, standard search
-    // Insert prefixes
-    bool loadingProgress = (inputPrefixes.size() > 1000);
-    if (loadingProgress)
-      printf("[Building lookup16   0.0%%]\r");
+        // No wildcard used, standard search
+        // Insert prefixes
+        bool loadingProgress = (inputPrefixes.size() > 1000);
+        if (loadingProgress)
+            printf("[Building lookup16   0.0%%]\r");
 
-    nbPrefix = 0;
-    onlyFull = true;
-    for (int i = 0; i < (int)inputPrefixes.size(); i++) {
+        nbPrefix = 0;
+        onlyFull = true;
+        for (int i = 0; i < (int)inputPrefixes.size(); i++) {
 
-      PREFIX_ITEM it;
-      std::vector<PREFIX_ITEM> itPrefixes;
+            PREFIX_ITEM it;
+            std::vector<PREFIX_ITEM> itPrefixes;
 
-      if (!caseSensitive) {
+            if (!caseSensitive) {
 
-        // For caseunsensitive search, loop through all possible combination
-        // and fill up lookup table
-        vector<string> subList;
-        enumCaseUnsentivePrefix(inputPrefixes[i], subList);
+                // For caseunsensitive search, loop through all possible combination
+                // and fill up lookup table
+                vector<string> subList;
+                enumCaseUnsentivePrefix(inputPrefixes[i], subList);
 
-        bool *found = new bool;
-        *found = false;
+                bool* found = new bool;
+                *found = false;
 
-        for (int j = 0; j < (int)subList.size(); j++) {
-          if (initPrefix(subList[j], &it)) {
-            it.found = found;
-            it.prefix = strdup(it.prefix); // We need to allocate here, subList will be destroyed
-            itPrefixes.push_back(it);
-          }
-        }
+                for (int j = 0; j < (int)subList.size(); j++) {
+                    if (initPrefix(subList[j], &it)) {
+                        it.found = found;
+                        it.prefix = strdup(it.prefix); // We need to allocate here, subList will be destroyed
+                        itPrefixes.push_back(it);
+                    }
+                }
 
-        if (itPrefixes.size() > 0) {
+                if (itPrefixes.size() > 0) {
 
-          // Compute difficulty for case unsensitive search
-          // Not obvious to perform the right calculation here using standard double
-          // Improvement are welcome
+                    // Compute difficulty for case unsensitive search
+                    // Not obvious to perform the right calculation here using standard double
+                    // Improvement are welcome
 
-          // Get the min difficulty and divide by the number of item having the same difficulty
-          // Should give good result when difficulty is large enough
-          double dMin = itPrefixes[0].difficulty;
-          int nbMin = 1;
-          for (int j = 1; j < (int)itPrefixes.size(); j++) {
-            if (itPrefixes[j].difficulty == dMin) {
-              nbMin++;
-            } else if (itPrefixes[j].difficulty < dMin) {
-              dMin = itPrefixes[j].difficulty;
-              nbMin = 1;
+                    // Get the min difficulty and divide by the number of item having the same difficulty
+                    // Should give good result when difficulty is large enough
+                    double dMin = itPrefixes[0].difficulty;
+                    int nbMin = 1;
+                    for (int j = 1; j < (int)itPrefixes.size(); j++) {
+                        if (itPrefixes[j].difficulty == dMin) {
+                            nbMin++;
+                        }
+                        else if (itPrefixes[j].difficulty < dMin) {
+                            dMin = itPrefixes[j].difficulty;
+                            nbMin = 1;
+                        }
+                    }
+
+                    dMin /= (double)nbMin;
+
+                    // Updates
+                    for (int j = 0; j < (int)itPrefixes.size(); j++)
+                        itPrefixes[j].difficulty = dMin;
+
+                }
+
             }
-          }
+            else {
 
-          dMin /= (double)nbMin;
+                if (initPrefix(inputPrefixes[i], &it)) {
+                    bool* found = new bool;
+                    *found = false;
+                    it.found = found;
+                    itPrefixes.push_back(it);
+                }
 
-          // Updates
-          for (int j = 0; j < (int)itPrefixes.size(); j++)
-            itPrefixes[j].difficulty = dMin;
+            }
+
+            if (itPrefixes.size() > 0) {
+
+                // Add the item to all correspoding prefixes in the lookup table
+                for (int j = 0; j < (int)itPrefixes.size(); j++) {
+
+                    prefix_t p = itPrefixes[j].sPrefix;
+
+                    if (prefixes[p].items == NULL) {
+                        prefixes[p].items = new vector<PREFIX_ITEM>();
+                        prefixes[p].found = false;
+                        usedPrefix.push_back(p);
+                    }
+                    (*prefixes[p].items).push_back(itPrefixes[j]);
+
+                }
+
+                onlyFull &= it.isFull;
+                nbPrefix++;
+
+            }
+
+            if (loadingProgress && i % 1000 == 0)
+                printf("[Building lookup16 %5.1f%%]\r", (((double)i) / (double)(inputPrefixes.size() - 1)) * 100.0);
+        }
+
+        if (loadingProgress)
+            printf("\n");
+
+        //dumpPrefixes();
+
+        if (!caseSensitive && searchType == BECH32) {
+            printf("Error, case unsensitive search with BECH32 not allowed.\n");
+            exit(1);
+        }
+
+        if (nbPrefix == 0) {
+            printf("VanitySearch: nothing to search !\n");
+            exit(1);
+        }
+
+        // Second level lookup
+        uint32_t unique_sPrefix = 0;
+        uint32_t minI = 0xFFFFFFFF;
+        uint32_t maxI = 0;
+        for (int i = 0; i < (int)prefixes.size(); i++) {
+            if (prefixes[i].items) {
+                LPREFIX lit;
+                lit.sPrefix = i;
+                if (prefixes[i].items) {
+                    for (int j = 0; j < (int)prefixes[i].items->size(); j++) {
+                        lit.lPrefixes.push_back((*prefixes[i].items)[j].lPrefix);
+                    }
+                }
+                sort(lit.lPrefixes.begin(), lit.lPrefixes.end());
+                usedPrefixL.push_back(lit);
+                if ((uint32_t)lit.lPrefixes.size() > maxI) maxI = (uint32_t)lit.lPrefixes.size();
+                if ((uint32_t)lit.lPrefixes.size() < minI) minI = (uint32_t)lit.lPrefixes.size();
+                unique_sPrefix++;
+            }
+            if (loadingProgress)
+                printf("[Building lookup32 %.1f%%]\r", ((double)i * 100.0) / (double)prefixes.size());
+        }
+
+        if (loadingProgress)
+            printf("\n");
+
+        _difficulty = getDiffuclty();
+        string seachInfo = string(searchModes[searchMode]) + (startPubKeySpecified ? ", with public key" : "");
+        if (nbPrefix == 1) {
+            if (!caseSensitive) {
+                // Case unsensitive search
+                printf("Difficulty: %.0f\n", _difficulty);
+                printf("Search: %s [%s, Case unsensitive] (Lookup size %d)\n", inputPrefixes[0].c_str(), seachInfo.c_str(), unique_sPrefix);
+            }
+            else {
+                printf("Difficulty: %.0f\n", _difficulty);
+                printf("Search: %s [%s]\n", inputPrefixes[0].c_str(), seachInfo.c_str());
+            }
+        }
+        else {
+            if (onlyFull) {
+                printf("Search: %d addresses (Lookup size %d,[%d,%d]) [%s]\n", nbPrefix, unique_sPrefix, minI, maxI, seachInfo.c_str());
+            }
+            else {
+                printf("Search: %d prefixes (Lookup size %d) [%s]\n", nbPrefix, unique_sPrefix, seachInfo.c_str());
+            }
+        }
+
+    }
+    else {
+
+        // Wild card search
+        switch (inputPrefixes[0].data()[0]) {
+
+        case '1':
+            searchType = P2PKH;
+            break;
+        case '3':
+            searchType = P2SH;
+            break;
+        case 'b':
+        case 'B':
+            searchType = BECH32;
+            break;
+
+        default:
+            printf("Invalid start character 1,3 or b, expected");
+            exit(1);
 
         }
 
-      } else {
-
-        if (initPrefix(inputPrefixes[i], &it)) {
-          bool *found = new bool;
-          *found = false;
-          it.found = found;
-          itPrefixes.push_back(it);
+        string searchInfo = string(searchModes[searchMode]) + (startPubKeySpecified ? ", with public key" : "");
+        if (inputPrefixes.size() == 1) {
+            printf("Search: %s [%s]\n", inputPrefixes[0].c_str(), searchInfo.c_str());
+        }
+        else {
+            printf("Search: %d patterns [%s]\n", (int)inputPrefixes.size(), searchInfo.c_str());
         }
 
-      }
-
-      if (itPrefixes.size() > 0) {
-
-        // Add the item to all correspoding prefixes in the lookup table
-        for (int j = 0; j < (int)itPrefixes.size(); j++) {
-
-          prefix_t p = itPrefixes[j].sPrefix;
-
-          if (prefixes[p].items == NULL) {
-            prefixes[p].items = new vector<PREFIX_ITEM>();
-            prefixes[p].found = false;
-            usedPrefix.push_back(p);
-          }
-          (*prefixes[p].items).push_back(itPrefixes[j]);
-
-        }
-
-        onlyFull &= it.isFull;
-        nbPrefix++;
-
-      }
-
-      if (loadingProgress && i % 1000 == 0)
-        printf("[Building lookup16 %5.1f%%]\r", (((double)i) / (double)(inputPrefixes.size() - 1)) * 100.0);
-    }
-
-    if (loadingProgress)
-      printf("\n");
-
-    //dumpPrefixes();
-
-    if (!caseSensitive && searchType == BECH32) {
-      printf("Error, case unsensitive search with BECH32 not allowed.\n");
-      exit(1);
-    }
-
-    if (nbPrefix == 0) {
-      printf("VanitySearch: nothing to search !\n");
-      exit(1);
-    }
-
-    // Second level lookup
-    uint32_t unique_sPrefix = 0;
-    uint32_t minI = 0xFFFFFFFF;
-    uint32_t maxI = 0;
-    for (int i = 0; i < (int)prefixes.size(); i++) {
-      if (prefixes[i].items) {
-        LPREFIX lit;
-        lit.sPrefix = i;
-        if (prefixes[i].items) {
-          for (int j = 0; j < (int)prefixes[i].items->size(); j++) {
-            lit.lPrefixes.push_back((*prefixes[i].items)[j].lPrefix);
-          }
-        }
-        sort(lit.lPrefixes.begin(), lit.lPrefixes.end());
-        usedPrefixL.push_back(lit);
-        if ((uint32_t)lit.lPrefixes.size() > maxI) maxI = (uint32_t)lit.lPrefixes.size();
-        if ((uint32_t)lit.lPrefixes.size() < minI) minI = (uint32_t)lit.lPrefixes.size();
-        unique_sPrefix++;
-      }
-      if (loadingProgress)
-        printf("[Building lookup32 %.1f%%]\r", ((double)i*100.0) / (double)prefixes.size());
-    }
-
-    if (loadingProgress)
-      printf("\n");
-
-    _difficulty = getDiffuclty();
-    string seachInfo = string(searchModes[searchMode]) + (startPubKeySpecified ? ", with public key" : "");
-    if (nbPrefix == 1) {
-      if (!caseSensitive) {
-        // Case unsensitive search
-        printf("Difficulty: %.0f\n", _difficulty);
-        printf("Search: %s [%s, Case unsensitive] (Lookup size %d)\n", inputPrefixes[0].c_str(), seachInfo.c_str(), unique_sPrefix);
-      } else {
-        printf("Difficulty: %.0f\n", _difficulty);
-        printf("Search: %s [%s]\n", inputPrefixes[0].c_str(), seachInfo.c_str());
-      }
-    } else {
-      if (onlyFull) {
-        printf("Search: %d addresses (Lookup size %d,[%d,%d]) [%s]\n", nbPrefix, unique_sPrefix, minI, maxI, seachInfo.c_str());
-      } else {
-        printf("Search: %d prefixes (Lookup size %d) [%s]\n", nbPrefix, unique_sPrefix, seachInfo.c_str());
-      }
-    }
-
-  } else {
-
-    // Wild card search
-    switch (inputPrefixes[0].data()[0]) {
-
-    case '1':
-      searchType = P2PKH;
-      break;
-    case '3':
-      searchType = P2SH;
-      break;
-    case 'b':
-    case 'B':
-      searchType = BECH32;
-      break;
-
-    default:
-      printf("Invalid start character 1,3 or b, expected");
-      exit(1);
+        patternFound = (bool*)malloc(inputPrefixes.size() * sizeof(bool));
+        memset(patternFound, 0, inputPrefixes.size() * sizeof(bool));
 
     }
 
-    string searchInfo = string(searchModes[searchMode]) + (startPubKeySpecified ? ", with public key" : "");
-    if (inputPrefixes.size() == 1) {
-      printf("Search: %s [%s]\n", inputPrefixes[0].c_str(), searchInfo.c_str());
-    } else {
-      printf("Search: %d patterns [%s]\n", (int)inputPrefixes.size(), searchInfo.c_str());
+    // Compute Generator table G[n] = (n+1)*G
+
+    Point g = secp->G;
+    Gn[0] = g;
+    g = secp->DoubleDirect(g);
+    Gn[1] = g;
+    for (int i = 2; i < CPU_GRP_SIZE / 2; i++) {
+        g = secp->AddDirect(g, secp->G);
+        Gn[i] = g;
+    }
+    // _2Gn = CPU_GRP_SIZE*G
+    _2Gn = secp->DoubleDirect(Gn[CPU_GRP_SIZE / 2 - 1]);
+
+    // Constant for endomorphism
+    // if a is a nth primitive root of unity, a^-1 is also a nth primitive root.
+    // beta^3 = 1 mod p implies also beta^2 = beta^-1 mop (by multiplying both side by beta^-1)
+    // (beta^3 = 1 mod p),  beta2 = beta^-1 = beta^2
+    // (lambda^3 = 1 mod n), lamba2 = lamba^-1 = lamba^2
+    beta.SetBase16("7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
+    lambda.SetBase16("5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
+    beta2.SetBase16("851695d49a83f8ef919bb86153cbcb16630fb68aed0a766a3ec693d68e6afa40");
+    lambda2.SetBase16("ac9c52b33fa3cf1f5ad9e3fd77ed9ba4a880b9fc8ec739c2e0cfc810b51283ce");
+
+    // Seed
+    if (seed.length() == 0) {
+        // Default seed
+        seed = Timer::getSeed(32);
     }
 
-    patternFound = (bool *)malloc(inputPrefixes.size()*sizeof(bool));
-    memset(patternFound,0, inputPrefixes.size() * sizeof(bool));
+    if (paranoiacSeed) {
+        seed += Timer::getSeed(32);
+    }
 
-  }
-
-  // Compute Generator table G[n] = (n+1)*G
-
-  Point g = secp->G;
-  Gn[0] = g;
-  g = secp->DoubleDirect(g);
-  Gn[1] = g;
-  for (int i = 2; i < CPU_GRP_SIZE/2; i++) {
-    g = secp->AddDirect(g,secp->G);
-    Gn[i] = g;
-  }
-  // _2Gn = CPU_GRP_SIZE*G
-  _2Gn = secp->DoubleDirect(Gn[CPU_GRP_SIZE/2-1]);
-
-  // Constant for endomorphism
-  // if a is a nth primitive root of unity, a^-1 is also a nth primitive root.
-  // beta^3 = 1 mod p implies also beta^2 = beta^-1 mop (by multiplying both side by beta^-1)
-  // (beta^3 = 1 mod p),  beta2 = beta^-1 = beta^2
-  // (lambda^3 = 1 mod n), lamba2 = lamba^-1 = lamba^2
-  beta.SetBase16("7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501ee");
-  lambda.SetBase16("5363ad4cc05c30e0a5261c028812645a122e22ea20816678df02967c1b23bd72");
-  beta2.SetBase16("851695d49a83f8ef919bb86153cbcb16630fb68aed0a766a3ec693d68e6afa40");
-  lambda2.SetBase16("ac9c52b33fa3cf1f5ad9e3fd77ed9ba4a880b9fc8ec739c2e0cfc810b51283ce");
-
-  // Seed
-  if (seed.length() == 0) {
-    // Default seed
-    seed = Timer::getSeed(32);
-  }
-
-  if (paranoiacSeed) {
-    seed += Timer::getSeed(32);
-  }
-
-  // Protect seed against "seed search attack" using pbkdf2_hmac_sha512
-  string salt = "VanitySearch";
-  unsigned char hseed[64];
-  pbkdf2_hmac_sha512(hseed, 64, (const uint8_t *)seed.c_str(), seed.length(),
-    (const uint8_t *)salt.c_str(), salt.length(),
-    2048);
-  startKey.SetInt32(0);
-  sha256(hseed, 64, (unsigned char *)startKey.bits64);
-
+    if (startPriv.GetInt32() == -1) {
+        // Protect seed against "seed search attack" using pbkdf2_hmac_sha512
+        string salt = "VanitySearch";
+        unsigned char hseed[64];
+        pbkdf2_hmac_sha512(hseed, 64, (const uint8_t*)seed.c_str(), seed.length(),
+            (const uint8_t*)salt.c_str(), salt.length(),
+            2048);
+        startKey.SetInt32(0);
+        sha256(hseed, 64, (unsigned char*)startKey.bits64);
+    }
+    else {
+        startKey.Set(&startPriv);
+    }
   char *ctimeBuff;
   time_t now = time(NULL);
   ctimeBuff = ctime(&now);

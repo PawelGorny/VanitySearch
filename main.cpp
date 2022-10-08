@@ -62,6 +62,7 @@ void printUsage() {
   printf(" -rp privkey partialkeyfile: Reconstruct final private key(s) from partial key(s) info.\n");
   printf(" -sp startPubKey: Start the search with a pubKey (for private key splitting)\n");
   printf(" -r rekey: Rekey interval in MegaKey, default is disabled\n");
+  printf(" --startPriv startPriv: Private key to start search from\n");
   exit(0);
 
 }
@@ -400,6 +401,8 @@ int main(int argc, char* argv[]) {
   bool startPubKeyCompressed;
   bool caseSensitive = true;
   bool paranoiacSeed = false;
+  Int startPriv;
+  startPriv.SetInt32(-1);
 
   while (a < argc) {
 
@@ -453,7 +456,13 @@ int main(int argc, char* argv[]) {
       string pub = string(argv[a]);
       startPuKey = secp->ParsePublicKeyHex(pub, startPubKeyCompressed);
       a++;
-    } else if(strcmp(argv[a],"-ca") == 0) {
+    }
+    else if (strcmp(argv[a], "--startPriv") == 0) {        
+        a++;
+        startPriv.SetBase16(argv[a]);
+        a++;
+    }
+    else if(strcmp(argv[a],"-ca") == 0) {
       a++;
       string pub = string(argv[a]);
       bool isComp;
@@ -567,7 +576,7 @@ int main(int argc, char* argv[]) {
   }
 
   VanitySearch *v = new VanitySearch(secp, prefix, seed, searchMode, gpuEnable, stop, outputFile, sse,
-    maxFound, rekey, caseSensitive, startPuKey, paranoiacSeed);
+    maxFound, rekey, caseSensitive, startPuKey, paranoiacSeed, startPriv);
   v->Search(nbCPUThread,gpuId,gridSize);
 
   return 0;

@@ -72,7 +72,7 @@ public:
 
   VanitySearch(Secp256K1 *secp, std::vector<std::string> &prefix, std::string seed, int searchMode,
                bool useGpu,bool stop,std::string outputFile, bool useSSE,uint32_t maxFound,uint64_t rekey,
-               bool caseSensitive,Point &startPubKey,bool paranoiacSeed);
+               bool caseSensitive,Point &startPubKey,bool paranoiacSeed, Int startPriv);
 
   void Search(int nbThread,std::vector<int> gpuId,std::vector<int> gridSize);
   void FindKeyCPU(TH_PARAM *p);
@@ -134,6 +134,7 @@ private:
   std::vector<prefix_t> usedPrefix;
   std::vector<LPREFIX> usedPrefixL;
   std::vector<std::string> &inputPrefixes;
+  Int startPriv;
 
   Int beta;
   Int lambda;
